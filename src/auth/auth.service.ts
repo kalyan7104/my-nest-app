@@ -9,6 +9,10 @@ import { UsersService } from '../users/users.service';
 import { EmailVerification } from './email-verification.entity';
 import { MailService } from './mail.service';
 
+import { Doctor } from '../doctors/doctor.entity';
+import { VerificationStatus } from '../common/enums/verification-status.enum';
+
+
 @Injectable()
 export class AuthService {
   private mailService = new MailService();
@@ -18,11 +22,23 @@ export class AuthService {
     private jwtService: JwtService,
     @InjectRepository(EmailVerification)
     private emailRepo: Repository<EmailVerification>,
+    @InjectRepository(Doctor)
+  private doctorRepo: Repository<Doctor>,
   ) {}
 
   async signup(data: any) {
     data.password = await bcrypt.hash(data.password, 10);
     const user = await this.usersService.create(data);
+
+    if (user.role === 'DOCTOR') {
+  const doctor = this.doctorRepo.create({
+    user: user,
+    verificationStatus: VerificationStatus.PENDING,
+    isActive: true,
+  });
+
+  await this.doctorRepo.save(doctor);
+}
 
     const token = randomUUID();
     await this.emailRepo.save({ userId: user.id, token });
