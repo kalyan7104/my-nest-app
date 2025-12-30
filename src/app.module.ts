@@ -6,6 +6,7 @@ import { OtpModule } from './otp/otp.module';
 import { typeOrmConfig } from './config/typeorm.config';
 import { Doctor } from './doctors/doctor.entity';
 import { DoctorsModule } from './doctors/doctors.module';
+import { AvailabilityModule } from './availability/availability.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { DoctorsModule } from './doctors/doctors.module';
     UsersModule,
     OtpModule,
     DoctorsModule,
+    AvailabilityModule
   ],
 })
 export class AppModule {}
