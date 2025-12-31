@@ -49,4 +49,13 @@ export class AvailabilityController {
   getDoctorAvailability(@Param('doctorId') doctorId: number) {
     return this.availabilityService.getDoctorAvailability(doctorId);
   }
+
+  @Get('doctor/:doctorId/date/:date')
+getAvailabilityByDate(
+  @Param('doctorId') doctorId: number,
+  @Param('date') date: string,
+) {
+  return this.availabilityService.getAvailabilityByDate(doctorId, date);
+}
+
 }

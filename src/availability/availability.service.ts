@@ -6,6 +6,8 @@ import { Slot } from './slot.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { VerificationStatus } from '../common/enums/verification-status.enum';
 
+import { RecurringAvailability, WeekDay } from './recurring-availability.entity';
+
 @Injectable()
 export class AvailabilityService {
   constructor(
@@ -17,7 +19,13 @@ export class AvailabilityService {
 
     @InjectRepository(Doctor)
     private doctorRepo: Repository<Doctor>,
+
+    @InjectRepository(RecurringAvailability)
+private recurringRepo: Repository<RecurringAvailability>,
+
   ) {}
+
+ 
 
   // 1️⃣ Create availability (date)
   async createAvailability(userId: number, date: string) {
@@ -85,4 +93,91 @@ export class AvailabilityService {
       relations: ['doctor', 'slots'],
     });
   }
+
+  async getAvailabilityByDate(doctorId: number, date: string) {
+  // 1️⃣ Check custom availability first
+  const customAvailability = await this.availabilityRepo.findOne({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      isActive: true,
+    },
+    relations: ['slots'],
+  });
+
+  if (customAvailability) {
+    const availableSlots = customAvailability.slots.filter(
+      (slot) => !slot.isBooked,
+    );
+
+    return {
+      source: 'CUSTOM',
+      date,
+      slots: availableSlots,
+    };
+  }
+
+  // 2️⃣ No custom availability → use recurring availability
+  const dayOfWeek = new Date(date)
+    .toLocaleDateString('en-US', { weekday: 'long' })
+    .toUpperCase() as WeekDay;
+
+  const recurringRules = await this.recurringRepo.find({
+    where: {
+      doctor: { id: doctorId },
+      dayOfWeek,
+      isActive: true,
+    },
+  });
+
+  if (recurringRules.length === 0) {
+    return {
+      source: 'NONE',
+      date,
+      slots: [],
+    };
+  }
+
+  // 3️⃣ Generate slots dynamically (30 min)
+  const slots: {
+  startTime: string;
+  endTime: string;
+  isBooked: boolean;
+}[] = [];
+
+
+  for (const rule of recurringRules) {
+    let start = this.timeToMinutes(rule.startTime);
+    const end = this.timeToMinutes(rule.endTime);
+
+    while (start + 30 <= end) {
+      slots.push({
+        startTime: this.minutesToTime(start),
+        endTime: this.minutesToTime(start + 30),
+        isBooked: false,
+      });
+      start += 30;
+    }
+  }
+
+  return {
+    source: 'RECURRING',
+    date,
+    slots,
+  };
+}
+
+private timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+private minutesToTime(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const m = (minutes % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
 }
