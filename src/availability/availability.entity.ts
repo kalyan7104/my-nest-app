@@ -6,8 +6,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { Doctor } from '../doctors/doctor.entity';
-import { OneToMany } from 'typeorm';
-import { Slot } from './slot.entity';
+import { ScheduledType } from '../common/enums/scheduled-type.enum';
 
 @Entity('availabilities')
 export class Availability {
@@ -17,15 +16,32 @@ export class Availability {
   @ManyToOne(() => Doctor, { onDelete: 'CASCADE' })
   doctor: Doctor;
 
+  // 📅 Custom date availability
   @Column({ type: 'date' })
   date: string;
+
+  // ⏰ Time window
+  @Column()
+  startTime: string; // "12:00"
+
+  @Column()
+  endTime: string; // "14:00"
+
+  // 🧠 Scheduling strategy
+  @Column({
+    type: 'enum',
+    enum: ScheduledType,
+    default: ScheduledType.SLOT,
+  })
+  scheduledType: ScheduledType;
+
+  // 👥 Capacity per time window
+  @Column({ default: 1 })
+  capacity: number;
 
   @Column({ default: true })
   isActive: boolean;
 
   @CreateDateColumn()
   createdAt: Date;
-
-  @OneToMany(() => Slot, (slot) => slot.availability)
-  slots: Slot[];
 }

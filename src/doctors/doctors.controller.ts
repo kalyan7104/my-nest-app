@@ -37,8 +37,11 @@ export class DoctorsController {
   @Post('profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DOCTOR')
-  CreateProfile(@Req() req, @Body() body) {
-    return this.doctorsService.upsertProfile(req.user.userId, body);
+   upsertProfile(@Req() req, @Body() body) {
+    return this.doctorsService.upsertProfile(
+      req.user.userId,
+      body,
+    );
   }
 
   // 4️⃣ Add specialization

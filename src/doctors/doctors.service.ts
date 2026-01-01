@@ -9,7 +9,7 @@ import { VerificationStatus } from '../common/enums/verification-status.enum';
 
 import { Profile } from './profile.entity';
 import { Specialization } from './specialization.entity';
-
+import { DoctorSpecialization } from '../common/enums/doctor-specialization.enum';
 
 @Injectable()
 export class DoctorsService {
@@ -70,7 +70,6 @@ async verifyDoctor(doctorId: number,status: VerificationStatus) {
 async upsertProfile(userId: number, data: any) {
   const doctor = await this.doctorRepo.findOne({
     where: { user: { id: userId } },
-    relations: ['user'],
   });
 
   if (!doctor) {
@@ -81,32 +80,40 @@ async upsertProfile(userId: number, data: any) {
     throw new BadRequestException('Doctor not approved');
   }
 
-  const existingProfile = await this.profileRepo.findOne({
+  // ✅ Update specialization directly in Doctor
+  if (data.specialization) {
+    doctor.specialization = data.specialization as DoctorSpecialization;
+    await this.doctorRepo.save(doctor);
+  }
+
+  // 🔍 Find existing profile
+  let profile = await this.profileRepo.findOne({
     where: { doctor: { id: doctor.id } },
+    relations: ['doctor'],
   });
 
-  let profileToSave: Profile;
-
-  if (!existingProfile) {
-    profileToSave = this.profileRepo.create({
-      doctor: doctor,
+  if (!profile) {
+    profile = this.profileRepo.create({
+      doctor,
       bio: data.bio,
       experienceYears: data.experienceYears,
       consultationFee: data.consultationFee,
       consultationHours: data.consultationHours,
     });
   } else {
-    profileToSave = existingProfile;
-    profileToSave.bio = data.bio;
-    profileToSave.experienceYears = data.experienceYears;
-    profileToSave.consultationFee = data.consultationFee;
-    profileToSave.consultationHours = data.consultationHours;
+    profile.bio = data.bio;
+    profile.experienceYears = data.experienceYears;
+    profile.consultationFee = data.consultationFee;
+    profile.consultationHours = data.consultationHours;
   }
 
-  await this.profileRepo.save(profileToSave);
+  await this.profileRepo.save(profile);
 
-  return { message: 'Profile saved successfully' };
+  return {
+    message: 'Profile updated successfully',
+  };
 }
+
 
 
 async addSpecialization(userId: number, name: string) {

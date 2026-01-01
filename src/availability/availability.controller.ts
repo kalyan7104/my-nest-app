@@ -20,10 +20,10 @@ export class AvailabilityController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DOCTOR')
-  createAvailability(@Req() req, @Body('date') date: string) {
+  createAvailability(@Req() req, @Body() body) {
     return this.availabilityService.createAvailability(
       req.user.userId,
-      date,
+      body,
     );
   }
 
@@ -55,7 +55,11 @@ getAvailabilityByDate(
   @Param('doctorId') doctorId: number,
   @Param('date') date: string,
 ) {
-  return this.availabilityService.getAvailabilityByDate(doctorId, date);
+  return this.availabilityService.getAvailabilityByDate(
+    doctorId,
+    date,
+  );
 }
+
 
 }

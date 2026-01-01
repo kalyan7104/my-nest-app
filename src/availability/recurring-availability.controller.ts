@@ -23,12 +23,10 @@ export class RecurringAvailabilityController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DOCTOR')
-  create(@Req() req, @Body() body) {
+  createRecurring(@Req() req, @Body() body) {
     return this.recurringService.createRecurringAvailability(
       req.user.userId,
-      body.dayOfWeek,
-      body.startTime,
-      body.endTime,
+      body,
     );
   }
 

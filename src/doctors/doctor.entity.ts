@@ -10,7 +10,7 @@ import {
 import { User } from '../users/user.entity';
 import { VerificationStatus } from '../common/enums/verification-status.enum';
 
-
+import { DoctorSpecialization } from '../common/enums/doctor-specialization.enum';
 
 
 
@@ -25,6 +25,14 @@ export class Doctor {
   default: VerificationStatus.PENDING,
 })
 verificationStatus: VerificationStatus;
+
+
+  @Column({
+    type: 'enum',
+    enum: DoctorSpecialization,
+    nullable: true,
+  })
+  specialization: DoctorSpecialization;
 
 
   @Column({ default: true })

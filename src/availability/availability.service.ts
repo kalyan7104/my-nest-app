@@ -7,6 +7,8 @@ import { Doctor } from '../doctors/doctor.entity';
 import { VerificationStatus } from '../common/enums/verification-status.enum';
 
 import { RecurringAvailability, WeekDay } from './recurring-availability.entity';
+import { ScheduledType } from '../common/enums/scheduled-type.enum';
+
 
 @Injectable()
 export class AvailabilityService {
@@ -28,7 +30,15 @@ private recurringRepo: Repository<RecurringAvailability>,
  
 
   // 1️⃣ Create availability (date)
-  async createAvailability(userId: number, date: string) {
+  async createAvailability(userId: number, body: any) {
+    const {
+      date,
+      startTime,
+      endTime,
+      scheduledType = ScheduledType.SLOT,
+      capacity,
+    } = body;
+
     const doctor = await this.doctorRepo.findOne({
       where: { user: { id: userId } },
       relations: ['user'],
@@ -42,9 +52,39 @@ private recurringRepo: Repository<RecurringAvailability>,
       throw new BadRequestException('Doctor not approved');
     }
 
+    // ⏱️ Time validation
+    const start = this.timeToMinutes(startTime);
+    const end = this.timeToMinutes(endTime);
+
+    if (end <= start) {
+      throw new BadRequestException(
+        'End time must be greater than start time',
+      );
+    }
+
+    // 👥 Capacity validation
+    if (scheduledType === ScheduledType.SLOT && capacity !== 1) {
+      throw new BadRequestException(
+        'Slot scheduling must have capacity 1',
+      );
+    }
+
+    if (
+      scheduledType === ScheduledType.WAVE &&
+      (!capacity || capacity < 1)
+    ) {
+      throw new BadRequestException(
+        'Wave scheduling requires capacity > 0',
+      );
+    }
+
     const availability = this.availabilityRepo.create({
       doctor,
       date,
+      startTime,
+      endTime,
+      scheduledType,
+      capacity: scheduledType === ScheduledType.SLOT ? 1 : capacity,
     });
 
     await this.availabilityRepo.save(availability);
@@ -94,7 +134,7 @@ private recurringRepo: Repository<RecurringAvailability>,
     });
   }
 
-  async getAvailabilityByDate(doctorId: number, date: string) {
+ /* async getAvailabilityByDate(doctorId: number, date: string) {
   // 1️⃣ Check custom availability first
   const customAvailability = await this.availabilityRepo.findOne({
     where: {
@@ -165,7 +205,97 @@ private recurringRepo: Repository<RecurringAvailability>,
     date,
     slots,
   };
+}*/
+
+async getAvailabilityByDate(doctorId: number, date: string) {
+  // 1️⃣ Check CUSTOM availability first
+  const custom = await this.availabilityRepo.findOne({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      isActive: true,
+    },
+  });
+
+  if (custom) {
+    return {
+      source: 'CUSTOM',
+      date,
+      scheduledType: custom.scheduledType,
+      slots: this.generateSlots(
+        custom.startTime,
+        custom.endTime,
+        custom.capacity,
+      ),
+    };
+  }
+
+  // 2️⃣ Fallback to RECURRING availability
+  const dayOfWeek = new Date(date)
+    .toLocaleDateString('en-US', { weekday: 'long' })
+    .toUpperCase() as WeekDay;
+
+  const recurring = await this.recurringRepo.find({
+    where: {
+      doctor: { id: doctorId },
+      dayOfWeek,
+      isActive: true,
+    },
+  });
+
+  if (!recurring.length) {
+    return {
+      source: 'NONE',
+      date,
+      slots: [],
+    };
+  }
+
+  // Assume one rule per day (as per your validation)
+  const rule = recurring[0];
+
+  return {
+    source: 'RECURRING',
+    date,
+    scheduledType: rule.scheduledType,
+    slots: this.generateSlots(
+      rule.startTime,
+      rule.endTime,
+      rule.capacity,
+    ),
+  };
 }
+private generateSlots(
+  startTime: string,
+  endTime: string,
+  capacity: number,
+) {
+  const slots:{
+    startTime: string;
+    endTime: string;
+    capacity: number;
+    availableCapacity: number;
+  }[] = [];
+
+  let start = this.timeToMinutes(startTime);
+  const end = this.timeToMinutes(endTime);
+
+  const SLOT_DURATION = 30; // minutes
+
+  while (start + SLOT_DURATION <= end) {
+    slots.push({
+      startTime: this.minutesToTime(start),
+      endTime: this.minutesToTime(start + SLOT_DURATION),
+      capacity,
+      availableCapacity: capacity, // later reduced by appointments
+    });
+
+    start += SLOT_DURATION;
+  }
+
+  return slots;
+}
+
 
 private timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
