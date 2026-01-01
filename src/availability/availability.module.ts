@@ -16,5 +16,6 @@ import { RecurringAvailabilityController } from './recurring-availability.contro
   ],
   providers: [AvailabilityService, RecurringAvailabilityService],
   controllers: [AvailabilityController, RecurringAvailabilityController],
+  exports: [AvailabilityService, RecurringAvailabilityService],
 })
 export class AvailabilityModule {}

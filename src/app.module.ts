@@ -7,6 +7,8 @@ import { typeOrmConfig } from './config/typeorm.config';
 import { Doctor } from './doctors/doctor.entity';
 import { DoctorsModule } from './doctors/doctors.module';
 import { AvailabilityModule } from './availability/availability.module';
+import { App } from 'supertest/types';
+import { AppointmentsModule } from './appointments/appointments.module';
 
 @Module({
   imports: [
@@ -15,7 +17,8 @@ import { AvailabilityModule } from './availability/availability.module';
     UsersModule,
     OtpModule,
     DoctorsModule,
-    AvailabilityModule
+    AvailabilityModule,
+    AppointmentsModule,
   ],
 })
 export class AppModule {}

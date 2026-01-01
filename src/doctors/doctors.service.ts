@@ -140,6 +140,58 @@ async addSpecialization(userId: number, name: string) {
   return { message: 'Specialization added successfully' };
 }
 
+async getDoctors(specialization?: DoctorSpecialization) {
+  const query = this.doctorRepo.createQueryBuilder('doctor')
+    .leftJoinAndSelect('doctor.user', 'user')
+    .where('doctor.verificationStatus = :status', {
+      status: VerificationStatus.APPROVED,
+    })
+    .andWhere('doctor.isActive = true');
+
+  if (specialization) {
+    query.andWhere('doctor.specialization = :specialization', {
+      specialization,
+    });
+  }
+
+  const doctors = await query.getMany();
+
+  return doctors.map((doctor) => ({
+    id: doctor.id,
+    name: doctor.user.name,
+    specialization: doctor.specialization,
+  }));
+}
+
+async getDoctorProfile(doctorId: number) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { id: doctorId },
+    relations: ['user'],
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  const profile = await this.profileRepo.findOne({
+    where: { doctor: { id: doctor.id } },
+  });
+
+  return {
+    doctorId: doctor.id,
+    name: doctor.user.name,
+    specialization: doctor.specialization,
+    verificationStatus: doctor.verificationStatus,
+    profile: profile
+      ? {
+          bio: profile.bio,
+          experienceYears: profile.experienceYears,
+          consultationFee: profile.consultationFee,
+          consultationHours: profile.consultationHours,
+        }
+      : null,
+  };
+}
 
 
 }

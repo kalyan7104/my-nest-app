@@ -5,12 +5,14 @@ import {
   Req,
   Body,
   Param,
+  Get, Query,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { DoctorsService } from './doctors.service';
 import { VerificationStatus } from '../common/enums/verification-status.enum';
+import { DoctorSpecialization } from '../common/enums/doctor-specialization.enum';
 
 @Controller('doctors')
 export class DoctorsController {
@@ -50,5 +52,20 @@ export class DoctorsController {
   @Roles('DOCTOR')
   addSpecialization(@Req() req, @Body('name') name: string) {
     return this.doctorsService.addSpecialization(req.user.userId, name);
+  }
+
+  // Get doctors (with optional specialization filter)
+
+  @Get()
+  getDoctors(
+    @Query('specialization') specialization?: DoctorSpecialization,
+  ) {
+    return this.doctorsService.getDoctors(specialization);
+  }
+
+  // Get doctor profile by doctorId
+  @Get(':doctorId/profile')
+  getDoctorProfile(@Param('doctorId') doctorId: number) {
+    return this.doctorsService.getDoctorProfile(doctorId);
   }
 }

@@ -11,6 +11,7 @@ import { AvailabilityService } from './availability.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { AvailabilityResponse } from '../types/availability-response.type';
 
 @Controller('availability')
 export class AvailabilityController {
@@ -28,7 +29,7 @@ export class AvailabilityController {
   }
 
   // 2️⃣ Doctor adds slot to availability
-  @Post(':availabilityId/slots')
+  /*@Post(':availabilityId/slots')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DOCTOR')
   addSlot(
@@ -43,7 +44,7 @@ export class AvailabilityController {
       body.endTime,
     );
   }
-
+*/
   // 3️⃣ Get doctor availability (for patients)
   @Get('doctor/:doctorId')
   getDoctorAvailability(@Param('doctorId') doctorId: number) {
@@ -54,7 +55,7 @@ export class AvailabilityController {
 getAvailabilityByDate(
   @Param('doctorId') doctorId: number,
   @Param('date') date: string,
-) {
+): Promise<AvailabilityResponse> {
   return this.availabilityService.getAvailabilityByDate(
     doctorId,
     date,

@@ -2,12 +2,13 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Availability } from './availability.entity';
-import { Slot } from './slot.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { VerificationStatus } from '../common/enums/verification-status.enum';
 
 import { RecurringAvailability, WeekDay } from './recurring-availability.entity';
 import { ScheduledType } from '../common/enums/scheduled-type.enum';
+import { Slot } from '../types/slot.type';
+import { AvailabilityResponse } from '../types/availability-response.type';
 
 
 @Injectable()
@@ -15,9 +16,6 @@ export class AvailabilityService {
   constructor(
     @InjectRepository(Availability)
     private availabilityRepo: Repository<Availability>,
-
-    @InjectRepository(Slot)
-    private slotRepo: Repository<Slot>,
 
     @InjectRepository(Doctor)
     private doctorRepo: Repository<Doctor>,
@@ -27,7 +25,6 @@ private recurringRepo: Repository<RecurringAvailability>,
 
   ) {}
 
- 
 
   // 1️⃣ Create availability (date)
   async createAvailability(userId: number, body: any) {
@@ -95,8 +92,10 @@ private recurringRepo: Repository<RecurringAvailability>,
     };
   }
 
+  
+
   // 2️⃣ Add slot to availability
-  async addSlot(
+  /*async addSlot(
     userId: number,
     availabilityId: number,
     startTime: string,
@@ -124,8 +123,9 @@ private recurringRepo: Repository<RecurringAvailability>,
     await this.slotRepo.save(slot);
 
     return { message: 'Slot added successfully' };
-  }
+  }*/
 
+    
   // 3️⃣ Get doctor availability (for patients)
   async getDoctorAvailability(doctorId: number) {
     return this.availabilityRepo.find({
@@ -207,7 +207,7 @@ private recurringRepo: Repository<RecurringAvailability>,
   };
 }*/
 
-async getAvailabilityByDate(doctorId: number, date: string) {
+async getAvailabilityByDate(doctorId: number, date: string): Promise<AvailabilityResponse> {
   // 1️⃣ Check CUSTOM availability first
   const custom = await this.availabilityRepo.findOne({
     where: {
