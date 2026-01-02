@@ -5,7 +5,7 @@ import { Appointment, AppointmentStatus } from './appointment.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { User } from '../users/user.entity';
 import { AvailabilityService } from '../availability/availability.service';
-
+import { Availability } from '../availability/availability.entity';
 @Injectable()
 export class AppointmentsService {
   constructor(
@@ -17,6 +17,10 @@ export class AppointmentsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
+
+    @InjectRepository(Availability)
+    private availabilityRepo: Repository<Availability>,
+
 
     private availabilityService: AvailabilityService,
   ) {}
@@ -45,12 +49,48 @@ if (!patient) {
   throw new BadRequestException('Patient not found');
 }
 
+    // Check for existing availability on the same date
+    const existing = await this.availabilityRepo.findOne({
+      where: {
+        doctor: { id: doctor.id },
+        date,
+        isActive: true,
+      },
+    });
+
+    if (existing) {
+      throw new BadRequestException(
+        'Availability already exists for this date',
+      );
+    }
+
     // 🔍 Get availability for the date
     const availability =
       await this.availabilityService.getAvailabilityByDate(
         doctorId,
         date,
       );
+
+    // ❌ Prevent duplicate booking for same doctor on same day
+const existingAppointment = await this.appointmentRepo.findOne({
+  where: {
+    patient: { id: patientId },
+    doctor: { id: doctorId },
+    date,
+    status: AppointmentStatus.BOOKED,
+  },
+});
+
+if (existingAppointment) {
+  throw new BadRequestException(
+    'You already have an appointment with this doctor on this date',
+  );
+}
+    if (!availability) {
+      throw new BadRequestException(
+        'No availability for the selected date',
+      );
+    }
 
     const slot = availability.slots.find(
       (s) =>

@@ -35,6 +35,9 @@ export class Availability {
   })
   scheduledType: ScheduledType;
 
+  @Column({ type: 'int', default: 30 })
+  slotDuration: number; // minutes
+
   // 👥 Capacity per time window
   @Column({ default: 1 })
   capacity: number;

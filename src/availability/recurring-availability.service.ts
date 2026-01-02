@@ -25,6 +25,7 @@ export class RecurringAvailabilityService {
     startTime,
     endTime,
     scheduledType = ScheduledType.SLOT,
+    slotDuration = 30,
     capacity,
   } = body;
 
@@ -65,6 +66,19 @@ export class RecurringAvailabilityService {
     );
   }
 
+  if (!slotDuration || slotDuration <= 0) {
+  throw new BadRequestException('Invalid slot duration');
+}
+
+const totalMinutes = end - start;
+
+if (totalMinutes % slotDuration !== 0) {
+  throw new BadRequestException(
+    'Time range must be divisible by slot duration',
+  );
+}
+
+
   // 👥 capacity validation
   if (scheduledType === ScheduledType.SLOT && capacity !== 1) {
     throw new BadRequestException(
@@ -84,6 +98,7 @@ export class RecurringAvailabilityService {
     startTime,
     endTime,
     scheduledType,
+    slotDuration,
     capacity: scheduledType === ScheduledType.SLOT ? 1 : capacity,
   });
 

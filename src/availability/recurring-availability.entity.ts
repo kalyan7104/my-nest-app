@@ -38,7 +38,7 @@ export class RecurringAvailability {
   @Column()
   endTime: string; // "13:00"
 
-  // 🧠 Scheduling strategy
+  // Scheduling strategy
   @Column({
     type: 'enum',
     enum: ScheduledType,
@@ -46,7 +46,11 @@ export class RecurringAvailability {
   })
   scheduledType: ScheduledType;
 
-  // 👥 Capacity per window
+  //Slot Duration
+  @Column({ type: 'int', default: 30 })
+  slotDuration: number; // minutes
+
+  //  Capacity per window
   @Column({ default: 1 })
   capacity: number;
 

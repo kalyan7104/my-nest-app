@@ -33,6 +33,7 @@ private recurringRepo: Repository<RecurringAvailability>,
       startTime,
       endTime,
       scheduledType = ScheduledType.SLOT,
+      slotDuration = 30,
       capacity,
     } = body;
 
@@ -59,6 +60,18 @@ private recurringRepo: Repository<RecurringAvailability>,
       );
     }
 
+    if (!slotDuration || slotDuration <= 0) {
+  throw new BadRequestException('Invalid slot duration');
+}
+
+const totalMinutes = end - start;
+
+if (totalMinutes % slotDuration !== 0) {
+  throw new BadRequestException(
+    'Time range must be divisible by slot duration',
+  );
+}
+
     // 👥 Capacity validation
     if (scheduledType === ScheduledType.SLOT && capacity !== 1) {
       throw new BadRequestException(
@@ -81,6 +94,7 @@ private recurringRepo: Repository<RecurringAvailability>,
       startTime,
       endTime,
       scheduledType,
+      slotDuration,
       capacity: scheduledType === ScheduledType.SLOT ? 1 : capacity,
     });
 
@@ -225,6 +239,7 @@ async getAvailabilityByDate(doctorId: number, date: string): Promise<Availabilit
       slots: this.generateSlots(
         custom.startTime,
         custom.endTime,
+        custom.slotDuration,
         custom.capacity,
       ),
     };
@@ -261,6 +276,7 @@ async getAvailabilityByDate(doctorId: number, date: string): Promise<Availabilit
     slots: this.generateSlots(
       rule.startTime,
       rule.endTime,
+      rule.slotDuration,
       rule.capacity,
     ),
   };
@@ -268,19 +284,15 @@ async getAvailabilityByDate(doctorId: number, date: string): Promise<Availabilit
 private generateSlots(
   startTime: string,
   endTime: string,
+  slotDuration: number,
   capacity: number,
-) {
-  const slots:{
-    startTime: string;
-    endTime: string;
-    capacity: number;
-    availableCapacity: number;
-  }[] = [];
+): Slot[] {
+  const slots: Slot[] = [];
 
   let start = this.timeToMinutes(startTime);
   const end = this.timeToMinutes(endTime);
 
-  const SLOT_DURATION = 30; // minutes
+  const SLOT_DURATION = slotDuration; // minutes
 
   while (start + SLOT_DURATION <= end) {
     slots.push({
