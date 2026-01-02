@@ -34,6 +34,7 @@ export class AppointmentsService {
 
     const doctor = await this.doctorRepo.findOne({
       where: { id: doctorId },
+      relations: ['user'],
     });
 
     if (!doctor) {
@@ -119,6 +120,19 @@ if (existingAppointment) {
       );
     }
 
+    const slotDurationMinutes =
+  this.timeToMinutes(endTime) - this.timeToMinutes(startTime);
+
+const consultationInterval =
+  Math.floor(slotDurationMinutes / slot.capacity);
+
+  const reportingMinutes =
+  this.timeToMinutes(startTime) +
+  bookedCount * consultationInterval;
+
+const reportingTime = this.minutesToTime(reportingMinutes);
+
+
     // ✅ Create appointment
     const appointment = this.appointmentRepo.create({
       doctor,
@@ -126,15 +140,35 @@ if (existingAppointment) {
       date,
       startTime,
       endTime,
+      reportingTime,
       reason,
     });
 
     await this.appointmentRepo.save(appointment);
 
     return {
-      message: 'Appointment booked successfully',
-      appointmentId: appointment.id,
-    };
+  message: 'Appointment booked successfully',
+  appointment: {
+    id: appointment.id,
+    doctorName: doctor.user.name,
+    date: appointment.date,
+    reportingTime: appointment.reportingTime,
+  },
+};
+
+  }
+
+  private timeToMinutes(time: string): number {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private minutesToTime(minutes: number): string {
+    const h = Math.floor(minutes / 60)
+      .toString()
+      .padStart(2, '0');
+    const m = (minutes % 60).toString().padStart(2, '0');
+    return `${h}:${m}`;
   }
 
   // 2️⃣ GET PATIENT APPOINTMENTS

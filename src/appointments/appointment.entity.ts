@@ -34,6 +34,10 @@ export class Appointment {
   @Column()
   endTime: string;
 
+  @Column()
+  reportingTime: string;
+
+
   // Optional reason for visit
   @Column({ nullable: true })
   reason: string;
