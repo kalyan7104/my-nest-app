@@ -5,7 +5,9 @@ import { Appointment, AppointmentStatus } from './appointment.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { User } from '../users/user.entity';
 import { AvailabilityService } from '../availability/availability.service';
-import { Availability } from '../availability/availability.entity';
+import { MoreThanOrEqual } from 'typeorm';
+import { In } from 'typeorm';
+
 @Injectable()
 export class AppointmentsService {
   constructor(
@@ -17,10 +19,6 @@ export class AppointmentsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
-
-    @InjectRepository(Availability)
-    private availabilityRepo: Repository<Availability>,
-
 
     private availabilityService: AvailabilityService,
   ) {}
@@ -50,21 +48,6 @@ if (!patient) {
   throw new BadRequestException('Patient not found');
 }
 
-    // Check for existing availability on the same date
-    const existing = await this.availabilityRepo.findOne({
-      where: {
-        doctor: { id: doctor.id },
-        date,
-        isActive: true,
-      },
-    });
-
-    if (existing) {
-      throw new BadRequestException(
-        'Availability already exists for this date',
-      );
-    }
-
     // 🔍 Get availability for the date
     const availability =
       await this.availabilityService.getAvailabilityByDate(
@@ -72,8 +55,14 @@ if (!patient) {
         date,
       );
 
-    // ❌ Prevent duplicate booking for same doctor on same day
-const existingAppointment = await this.appointmentRepo.findOne({
+    if (!availability) {
+      throw new BadRequestException(
+        'No availability for the selected date',
+      );
+    }
+
+    // Prevent duplicate booking for same doctor on same day
+  const existingAppointment = await this.appointmentRepo.findOne({
   where: {
     patient: { id: patientId },
     doctor: { id: doctorId },
@@ -82,16 +71,12 @@ const existingAppointment = await this.appointmentRepo.findOne({
   },
 });
 
-if (existingAppointment) {
-  throw new BadRequestException(
-    'You already have an appointment with this doctor on this date',
-  );
-}
-    if (!availability) {
+    if (existingAppointment) {
       throw new BadRequestException(
-        'No availability for the selected date',
+        'You already have an appointment with this doctor on this date',
       );
     }
+
 
     const slot = availability.slots.find(
       (s) =>
@@ -132,7 +117,6 @@ const consultationInterval =
 
 const reportingTime = this.minutesToTime(reportingMinutes);
 
-
     // ✅ Create appointment
     const appointment = this.appointmentRepo.create({
       doctor,
@@ -147,15 +131,14 @@ const reportingTime = this.minutesToTime(reportingMinutes);
     await this.appointmentRepo.save(appointment);
 
     return {
-  message: 'Appointment booked successfully',
+       message: 'Appointment booked successfully',
   appointment: {
     id: appointment.id,
     doctorName: doctor.user.name,
     date: appointment.date,
     reportingTime: appointment.reportingTime,
   },
-};
-
+    };
   }
 
   private timeToMinutes(time: string): number {
@@ -173,13 +156,26 @@ const reportingTime = this.minutesToTime(reportingMinutes);
 
   // 2️⃣ GET PATIENT APPOINTMENTS
   async getMyAppointments(patientId: number) {
-    return this.appointmentRepo.find({
+    const appointments = await this.appointmentRepo.find({
       where: {
         patient: { id: patientId },
       },
-      relations: ['doctor'],
+      relations: ['doctor', 'doctor.user'],
       order: { createdAt: 'DESC' },
     });
+
+    return appointments.map((a) => ({
+      AppointmentId: a.id,
+      date: a.date,
+      startTime: a.startTime,
+      endTime: a.endTime,
+      reportingTime: a.reportingTime,
+      status: a.status,
+      doctor: {
+        id: a.doctor.id,
+        name: a.doctor.user.name,
+      },
+    }));
   }
 
   // 3️⃣ CANCEL APPOINTMENT
@@ -205,4 +201,236 @@ const reportingTime = this.minutesToTime(reportingMinutes);
 
     return { message: 'Appointment cancelled' };
   }
+
+  async getUpcomingAppointments(patientId: number) {
+  const today = new Date().toISOString().split('T')[0];
+
+  return this.appointmentRepo.find({
+    where: {
+      patient: { id: patientId },
+      status: AppointmentStatus.BOOKED,
+      date: MoreThanOrEqual(today),
+    },
+    relations: ['doctor', 'doctor.user'],
+    order: {
+      date: 'ASC',
+      reportingTime: 'ASC',
+    },
+  });
+}
+
+  async getMyAppointmentHistory(patientId: number) {
+  const appointments = await this.appointmentRepo.find({
+    where: {
+      patient: { id: patientId },
+      status: In([
+        AppointmentStatus.COMPLETED,
+        AppointmentStatus.CANCELLED,
+      ]),
+    },
+    relations: ['doctor', 'doctor.user'],
+    order: {
+      date: 'DESC',
+      reportingTime: 'DESC',
+    },
+  });
+
+  // Return a clean, patient-friendly response
+  return appointments.map((a) => ({
+    id: a.id,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    reportingTime: a.reportingTime,
+    status: a.status,
+    doctor: {
+      id: a.doctor.id,
+      name: a.doctor.user.name,
+    },
+  }));
+}
+
+
+  // DOCTOR SIDE METHODS
+
+  async getDoctorUpcomingAppointments(userId: number) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  return this.appointmentRepo.find({
+    where: {
+      doctor: { id: doctor.id },
+      status: AppointmentStatus.BOOKED,
+      date: MoreThanOrEqual(today),
+    },
+    relations: ['patient'],
+    order: {
+      date: 'ASC',
+      reportingTime: 'ASC',
+    },
+  });
+}
+
+async getDoctorAppointmentsByDate(
+  userId: number,
+  date: string,
+) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  const appointments = await this.appointmentRepo.find({
+  where: {
+    doctor: { id: doctor.id },
+    date,
+    status: AppointmentStatus.BOOKED,
+  },
+  relations: ['patient'],
+  order: {
+    reportingTime: 'ASC',
+  },
+});
+  
+return appointments.map((a) => ({
+  AppointmentId: a.id,
+  date: a.date,
+  startTime: a.startTime,
+  endTime: a.endTime,
+  reportingTime: a.reportingTime,
+  status: a.status,
+  patient: {
+    id: a.patient.id,
+    name: a.patient.name,
+  },
+}));
+}
+
+
+async completeAppointment(userId: number, appointmentId: number) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  const appointment = await this.appointmentRepo.findOne({
+    where: {
+      id: appointmentId,
+      doctor: { id: doctor.id },
+      status: AppointmentStatus.BOOKED,
+    },
+  });
+
+  if (!appointment) {
+    throw new BadRequestException('Appointment not found');
+  }
+
+  appointment.status = AppointmentStatus.COMPLETED;
+  await this.appointmentRepo.save(appointment);
+
+  return { message: 'Appointment marked as completed' };
+}
+
+
+async cancelAppointmentByDoctor(
+  userId: number,
+  appointmentId: number,
+) {
+  // 1️⃣ Find doctor by logged-in user
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  // 2️⃣ Find appointment
+  const appointment = await this.appointmentRepo.findOne({
+    where: {
+      id: appointmentId,
+      doctor: { id: doctor.id },
+      status: AppointmentStatus.BOOKED,
+    },
+  });
+
+  if (!appointment) {
+    throw new BadRequestException(
+      'Appointment not found or already processed',
+    );
+  }
+
+  // 3️⃣ Cancel appointment
+  appointment.status = AppointmentStatus.CANCELLED;
+  await this.appointmentRepo.save(appointment);
+
+  return {
+    message: 'Appointment cancelled successfully',
+  };
+}
+
+async getAllDoctorAppointments(
+  userId: number,
+  status?: string,
+  date?: string,
+) {
+  // 1️⃣ Find doctor
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+  });
+
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
+
+  // 2️⃣ Build dynamic filter
+  const where: any = {
+    doctor: { id: doctor.id },
+  };
+
+  if (status) {
+    where.status = status;
+  }
+
+  if (date) {
+    where.date = date;
+  }
+
+  // 3️⃣ Fetch appointments
+  const appointments = await this.appointmentRepo.find({
+    where,
+    relations: ['patient'],
+    order: {
+      date: 'DESC',
+      reportingTime: 'ASC',
+    },
+  });
+
+  // 4️⃣ Map minimal response
+  return appointments.map((a) => ({
+    id: a.id,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    reportingTime: a.reportingTime,
+    status: a.status,
+    patient: {
+      id: a.patient.id,
+      name: a.patient.name,
+    },
+  }));
+}
 }
