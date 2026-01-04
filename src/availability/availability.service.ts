@@ -33,7 +33,7 @@ private recurringRepo: Repository<RecurringAvailability>,
       startTime,
       endTime,
       scheduledType = ScheduledType.SLOT,
-      slotDuration = 30,
+      slotDuration,
       capacity,
     } = body;
 

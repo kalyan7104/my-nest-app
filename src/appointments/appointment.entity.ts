@@ -34,7 +34,7 @@ export class Appointment {
   @Column()
   endTime: string;
 
-  @Column()
+  @Column({nullable: true})
   reportingTime: string;
 
 
