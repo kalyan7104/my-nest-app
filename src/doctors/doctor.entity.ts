@@ -44,6 +44,10 @@ verificationStatus: VerificationStatus;
   @UpdateDateColumn()
   updatedAt: Date;
 
+  @Column({ default: false })
+isElasticEnabled: boolean;
+
+
   //This is the Link for User entity
 
    @OneToOne(() => User, { onDelete: 'CASCADE' })

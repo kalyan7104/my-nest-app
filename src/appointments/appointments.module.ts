@@ -6,6 +6,7 @@ import { Appointment } from './appointment.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { User } from '../users/user.entity';
 import { AvailabilityModule } from '../availability/availability.module';
+import { ElasticModule } from 'src/elastic/elastic.module';
 
 @Module({
   imports: [
@@ -14,8 +15,9 @@ import { AvailabilityModule } from '../availability/availability.module';
       Doctor,
       User,
     ]),
-    AvailabilityModule, // ✅ Needed for availability checks
-  ],
+    AvailabilityModule,// ✅ Needed for availability checks
+    ElasticModule, 
+    ],
   controllers: [AppointmentsController],
   providers: [AppointmentsService],
 })

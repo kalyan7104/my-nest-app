@@ -7,6 +7,7 @@ import { User } from '../users/user.entity';
 import { AvailabilityService } from '../availability/availability.service';
 import { MoreThanOrEqual } from 'typeorm';
 import { In } from 'typeorm';
+import { ElasticSlotService } from '../elastic/elastic-slot.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -19,6 +20,8 @@ export class AppointmentsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
+
+    private elasticSlotService: ElasticSlotService,
 
     private availabilityService: AvailabilityService,
   ) {}
@@ -99,11 +102,20 @@ if (!patient) {
       },
     });
 
-    if (bookedCount >= slot.capacity) {
-      throw new BadRequestException(
-        'Slot is fully booked',
-      );
-    }
+    const elasticSlot =
+  await this.elasticSlotService.getOrCreateSlot(
+    doctor,
+    date,
+    startTime,
+    endTime,
+    slot.capacity,
+    bookedCount,
+  );
+
+if (!(await this.elasticSlotService.canAllocate(elasticSlot))) {
+  throw new BadRequestException('Doctor is fully booked');
+}
+
 
     const slotDurationMinutes =
   this.timeToMinutes(endTime) - this.timeToMinutes(startTime);
@@ -129,6 +141,12 @@ const reportingTime = this.minutesToTime(reportingMinutes);
     });
 
     await this.appointmentRepo.save(appointment);
+
+    appointment.elasticSlot = elasticSlot;
+await this.appointmentRepo.save(appointment);
+
+await this.elasticSlotService.incrementLoad(elasticSlot);
+
 
     return {
        message: 'Appointment booked successfully',
@@ -188,6 +206,7 @@ const reportingTime = this.minutesToTime(reportingMinutes);
         id: appointmentId,
         patient: { id: patientId },
       },
+      relations: ['elasticSlot'],
     });
 
     if (!appointment) {
@@ -197,7 +216,14 @@ const reportingTime = this.minutesToTime(reportingMinutes);
     }
 
     appointment.status = AppointmentStatus.CANCELLED;
-    await this.appointmentRepo.save(appointment);
+await this.appointmentRepo.save(appointment);
+
+if (appointment.elasticSlot) {
+  await this.elasticSlotService.decrementLoad(
+    appointment.elasticSlot,
+  );
+}
+;
 
     return { message: 'Appointment cancelled' };
   }
@@ -205,7 +231,7 @@ const reportingTime = this.minutesToTime(reportingMinutes);
   async getUpcomingAppointments(patientId: number) {
   const today = new Date().toISOString().split('T')[0];
 
-  return this.appointmentRepo.find({
+  const appointments = await this.appointmentRepo.find({
     where: {
       patient: { id: patientId },
       status: AppointmentStatus.BOOKED,
@@ -217,6 +243,19 @@ const reportingTime = this.minutesToTime(reportingMinutes);
       reportingTime: 'ASC',
     },
   });
+
+  return appointments.map((a) => ({
+    id: a.id,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    reportingTime: a.reportingTime,
+    status: a.status,
+    doctor: {
+      id: a.doctor.id,
+      name: a.doctor.user.name,
+    },
+  }));
 }
 
   async getMyAppointmentHistory(patientId: number) {
@@ -263,8 +302,7 @@ const reportingTime = this.minutesToTime(reportingMinutes);
   }
 
   const today = new Date().toISOString().split('T')[0];
-
-  return this.appointmentRepo.find({
+  const appointments = await this.appointmentRepo.find({
     where: {
       doctor: { id: doctor.id },
       status: AppointmentStatus.BOOKED,
@@ -276,6 +314,19 @@ const reportingTime = this.minutesToTime(reportingMinutes);
       reportingTime: 'ASC',
     },
   });
+
+  return appointments.map((a) => ({
+    id: a.id,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    reportingTime: a.reportingTime,
+    status: a.status,
+    patient: {
+      id: a.patient.id,
+      name: a.patient.name,
+    },
+  }));
 }
 
 async getDoctorAppointmentsByDate(
@@ -365,6 +416,7 @@ async cancelAppointmentByDoctor(
       doctor: { id: doctor.id },
       status: AppointmentStatus.BOOKED,
     },
+    relations: ['elasticSlot'],
   });
 
   if (!appointment) {
@@ -376,6 +428,16 @@ async cancelAppointmentByDoctor(
   // 3️⃣ Cancel appointment
   appointment.status = AppointmentStatus.CANCELLED;
   await this.appointmentRepo.save(appointment);
+
+  appointment.status = AppointmentStatus.CANCELLED;
+await this.appointmentRepo.save(appointment);
+
+if (appointment.elasticSlot) {
+  await this.elasticSlotService.decrementLoad(
+    appointment.elasticSlot,
+  );
+}
+
 
   return {
     message: 'Appointment cancelled successfully',

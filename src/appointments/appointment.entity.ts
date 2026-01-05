@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 import { Doctor } from '../doctors/doctor.entity';
 import { User } from '../users/user.entity';
+import { ElasticSlot } from '../elastic/elastic-slot.entity';
 
 export enum AppointmentStatus {
   BOOKED = 'BOOKED',
@@ -24,6 +25,9 @@ export class Appointment {
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   patient: User;
+
+  @ManyToOne(() => ElasticSlot, { nullable: true, onDelete: 'SET NULL' })
+elasticSlot: ElasticSlot;
 
   @Column({ type: 'date' })
   date: string;
@@ -51,4 +55,5 @@ export class Appointment {
 
   @CreateDateColumn()
   createdAt: Date;
+
 }
