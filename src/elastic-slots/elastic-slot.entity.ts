@@ -20,11 +20,20 @@ export class ElasticSlot {
   @ManyToOne(() => Availability, { onDelete: 'CASCADE' })
   availability: Availability; // 🔥 session-level link
 
+  // Base times (snapshot)
+  @Column({ type: 'time' ,nullable: true})
+  originalStartTime: string;
+
   @Column({ type: 'time' ,nullable: true})
   originalEndTime: string;
 
-  @Column({ type: 'time' ,nullable: true})
-  extendedEndTime: string;
+   // Elastic extensions (optional)
+  @Column({ type: 'time', nullable: true })
+  extendedStartTime: string | null;
+
+  @Column({ type: 'time', nullable: true })
+  extendedEndTime: string | null;
+
 
   @Column({
     type: 'enum',

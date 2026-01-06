@@ -340,23 +340,26 @@ async getAvailabilityByDate(
         (e) => e.availability.id === session.id,
       );
 
-      const effectiveEndTime = this.formatTime(
-  elastic ? elastic.extendedEndTime : session.endTime,
+      const effectiveStartTime = this.formatTime(
+  elastic?.extendedStartTime ?? session.startTime,
 );
 
+const effectiveEndTime = this.formatTime(
+  elastic?.extendedEndTime ?? session.endTime,
+);
 
-      return {
-        availabilityId: session.id,
-        scheduledType: session.scheduledType,
-        startTime: this.formatTime(session.startTime),
-        endTime: effectiveEndTime,
-        slots: this.generateSlots(
-          session.startTime,
-          effectiveEndTime,
-          session.slotDuration,
-          session.capacity,
-        ),
-      };
+return {
+  availabilityId: session.id,
+  scheduledType: session.scheduledType,
+  startTime: effectiveStartTime,
+  endTime: effectiveEndTime,
+  slots: this.generateSlots(
+    effectiveStartTime,
+    effectiveEndTime,
+    session.slotDuration,
+    session.capacity,
+  ),
+};
     }),
   };
 }

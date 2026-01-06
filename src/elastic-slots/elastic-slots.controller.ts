@@ -28,11 +28,32 @@ export class ElasticSlotsController {
     );
   }*/
 
-  @Post('expand-time')
+  /*@Post('expand-time')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('DOCTOR')
 expandTime(@Req() req, @Body() body) {
   return this.elasticSlotsService.expandSessionTime(
+    req.user.userId,
+    body,
+  );
+}
+
+@Post('expand-start-time')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('DOCTOR')
+expandStartTime(@Req() req, @Body() body) {
+  return this.elasticSlotsService.expandSessionStartTime(
+    req.user.userId,
+    body,
+  );
+}*/
+
+
+@Post('expand')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('DOCTOR')
+expand(@Req() req, @Body() body) {
+  return this.elasticSlotsService.expandSession(
     req.user.userId,
     body,
   );
