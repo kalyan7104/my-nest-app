@@ -78,11 +78,29 @@ if (!patient) {
     }
 
 
-    const slot = availability.slots.find(
-      (s) =>
-        s.startTime === startTime &&
-        s.endTime === endTime,
-    );
+    let slot: any = undefined;
+    if (Array.isArray(availability.sessions)) {
+      for (const session of availability.sessions) {
+        if (Array.isArray(session.slots)) {
+          const found = session.slots.find((s) => {
+            try {
+              return (
+                this.timeToMinutes(s.startTime) ===
+                  this.timeToMinutes(startTime) &&
+                this.timeToMinutes(s.endTime) ===
+                  this.timeToMinutes(endTime)
+              );
+            } catch (e) {
+              return false;
+            }
+          });
+          if (found) {
+            slot = found;
+            break;
+          }
+        }
+      }
+    }
 
     if (!slot) {
       throw new BadRequestException('Slot not available');

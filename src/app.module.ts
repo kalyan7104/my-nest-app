@@ -9,6 +9,7 @@ import { DoctorsModule } from './doctors/doctors.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { App } from 'supertest/types';
 import { AppointmentsModule } from './appointments/appointments.module';
+import { ElasticSlotsModule } from './elastic-slots/elastic-slots.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AppointmentsModule } from './appointments/appointments.module';
     DoctorsModule,
     AvailabilityModule,
     AppointmentsModule,
+    ElasticSlotsModule,
   ],
 })
 export class AppModule {}

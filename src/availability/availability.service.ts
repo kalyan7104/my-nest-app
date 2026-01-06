@@ -10,6 +10,8 @@ import { ScheduledType } from '../common/enums/scheduled-type.enum';
 import { Slot } from '../types/slot.type';
 import { AvailabilityResponse } from '../types/availability-response.type';
 
+import { In } from 'typeorm';
+import { ElasticSlot, ElasticSlotStatus } from '../elastic-slots/elastic-slot.entity';
 
 @Injectable()
 export class AvailabilityService {
@@ -23,6 +25,8 @@ export class AvailabilityService {
     @InjectRepository(RecurringAvailability)
 private recurringRepo: Repository<RecurringAvailability>,
 
+    @InjectRepository(ElasticSlot)
+    private elasticSlotRepo: Repository<ElasticSlot>,
   ) {}
 
 
@@ -87,6 +91,30 @@ if (totalMinutes % slotDuration !== 0) {
         'Wave scheduling requires capacity > 0',
       );
     }
+
+    // ✅ Allow multiple sessions but prevent overlap
+const existingSessions = await this.availabilityRepo.find({
+  where: {
+    doctor: { id: doctor.id },
+    date,
+    isActive: true,
+  },
+});
+
+for (const session of existingSessions) {
+  const existingStart = this.timeToMinutes(session.startTime);
+  const existingEnd = this.timeToMinutes(session.endTime);
+
+  const overlaps =
+    !(end <= existingStart || start >= existingEnd);
+
+  if (overlaps) {
+    throw new BadRequestException(
+      `Session overlaps with existing session (${session.startTime} - ${session.endTime})`,
+    );
+  }
+}
+
 
     const availability = this.availabilityRepo.create({
       doctor,
@@ -221,7 +249,7 @@ if (totalMinutes % slotDuration !== 0) {
   };
 }*/
 
-async getAvailabilityByDate(doctorId: number, date: string): Promise<AvailabilityResponse> {
+/*async getAvailabilityByDate(doctorId: number, date: string): Promise<AvailabilityResponse> {
   // 1️⃣ Check CUSTOM availability first
   const custom = await this.availabilityRepo.findOne({
     where: {
@@ -280,7 +308,97 @@ async getAvailabilityByDate(doctorId: number, date: string): Promise<Availabilit
       rule.capacity,
     ),
   };
+}*/
+async getAvailabilityByDate(
+  doctorId: number,
+  date: string,
+): Promise<AvailabilityResponse> {
+  // 1️⃣ Fetch ALL custom sessions for that date
+  const sessions = await this.availabilityRepo.find({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      isActive: true,
+    },
+    order: { startTime: 'ASC' },
+  });
+
+  const elasticSlots = await this.elasticSlotRepo.find({
+  where: {
+    availability: { id: In(sessions.map((s) => s.id)) },
+    status: ElasticSlotStatus.ACTIVE,
+  },
+  relations: ['availability'],
+});
+
+  if (sessions.length > 0) {
+  return {
+    source: 'CUSTOM',
+    date,
+    sessions: sessions.map((session) => {
+      const elastic = elasticSlots.find(
+        (e) => e.availability.id === session.id,
+      );
+
+      const effectiveEndTime = this.formatTime(
+  elastic ? elastic.extendedEndTime : session.endTime,
+);
+
+
+      return {
+        availabilityId: session.id,
+        scheduledType: session.scheduledType,
+        startTime: this.formatTime(session.startTime),
+        endTime: effectiveEndTime,
+        slots: this.generateSlots(
+          session.startTime,
+          effectiveEndTime,
+          session.slotDuration,
+          session.capacity,
+        ),
+      };
+    }),
+  };
 }
+  // 2️⃣ No custom sessions → fallback to recurring
+  const dayOfWeek = new Date(date)
+    .toLocaleDateString('en-US', { weekday: 'long' })
+    .toUpperCase() as WeekDay;
+
+  const recurringRules = await this.recurringRepo.find({
+    where: {
+      doctor: { id: doctorId },
+      dayOfWeek,
+      isActive: true,
+    },
+    order: { startTime: 'ASC' },
+  });
+
+  if (recurringRules.length === 0) {
+    return {
+      source: 'NONE',
+      date,
+      sessions: [],
+    };
+  }
+
+  return {
+    source: 'RECURRING',
+    date,
+    sessions: recurringRules.map((rule) => ({
+      scheduledType: rule.scheduledType,
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+      slots: this.generateSlots(
+        rule.startTime,
+        rule.endTime,
+        rule.slotDuration,
+        rule.capacity,
+      ),
+    })),
+  };
+}
+
 private generateSlots(
   startTime: string,
   endTime: string,
@@ -320,6 +438,11 @@ private minutesToTime(minutes: number): string {
     .padStart(2, '0');
   const m = (minutes % 60).toString().padStart(2, '0');
   return `${h}:${m}`;
+}
+
+private formatTime(time: string): string {
+  // Converts "11:00:00" → "11:00"
+  return time.length === 8 ? time.slice(0, 5) : time;
 }
 
 }
