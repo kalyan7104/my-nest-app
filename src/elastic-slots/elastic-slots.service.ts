@@ -8,6 +8,9 @@ import { ElasticSlot } from './elastic-slot.entity';
 import { Doctor } from '../doctors/doctor.entity';
 import { Availability } from '../availability/availability.entity';
 import { ElasticSlotStatus } from './elastic-slot.entity';
+import { ScheduledType } from '../common/enums/scheduled-type.enum';
+import { AppointmentStatus } from '../appointments/appointment.entity';
+import { Appointment } from '../appointments/appointment.entity';
 
 @Injectable()
 export class ElasticSlotsService {
@@ -20,6 +23,9 @@ export class ElasticSlotsService {
 
     @InjectRepository(Availability)
     private availabilityRepo: Repository<Availability>,
+
+    @InjectRepository(Appointment)
+    private appointmentRepo: Repository<Appointment>,
   ) {}
 
   /*async createElasticSlot(
@@ -392,4 +398,196 @@ const hh = parts[0].padStart(2, '0');
 const mm = (parts[1] ?? '00').padStart(2, '0');
 return `${hh}:${mm}`;
 }
+
+private minutesToTime(minutes: number): string {
+  const hh = Math.floor(minutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const mm = (minutes % 60).toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+async shrinkSessionTime(userId: number, body: any) {
+  const { availabilityId, newStartTime, newEndTime, reason } = body;
+
+  if (!newStartTime && !newEndTime) {
+    throw new BadRequestException(
+      'Provide at least newStartTime or newEndTime',
+    );
+  }
+
+  const availability = await this.availabilityRepo.findOne({
+    where: { id: availabilityId, isActive: true },
+    relations: ['doctor', 'doctor.user'],
+  });
+
+  if (!availability) {
+    throw new BadRequestException('Session not found');
+  }
+
+  if (availability.doctor.user.id !== userId) {
+    throw new BadRequestException('Unauthorized');
+  }
+
+  if (availability.scheduledType !== ScheduledType.WAVE) {
+    throw new BadRequestException(
+      'Shrinking is allowed only for WAVE scheduling',
+    );
+  }
+
+  const activeElastic = await this.elasticSlotRepo.findOne({
+    where: {
+      availability: { id: availabilityId },
+      status: ElasticSlotStatus.ACTIVE,
+    },
+  });
+
+  const currentStart =
+    activeElastic?.extendedStartTime ?? availability.startTime;
+  const currentEnd =
+    activeElastic?.extendedEndTime ?? availability.endTime;
+
+  const currentStartMin = this.timeToMinutes(currentStart);
+  const currentEndMin = this.timeToMinutes(currentEnd);
+
+  const newStartMin = newStartTime
+    ? this.timeToMinutes(newStartTime)
+    : currentStartMin;
+
+  const newEndMin = newEndTime
+    ? this.timeToMinutes(newEndTime)
+    : currentEndMin;
+
+  if (newStartMin >= newEndMin) {
+    throw new BadRequestException('Invalid shrink time range');
+  }
+
+  const appointments = await this.appointmentRepo.find({
+    where: {
+      doctor: { id: availability.doctor.id },
+      date: availability.date,
+      status: AppointmentStatus.BOOKED,
+    },
+    order: { startTime: 'ASC' },
+  });
+
+  const affectedAppointments = appointments.filter((appt) => {
+    const apptStartMin = this.timeToMinutes(appt.startTime);
+    return (
+      apptStartMin < newStartMin ||
+      apptStartMin >= newEndMin
+    );
+  });
+
+  const remainingSlots = this.generateSlots(
+    this.minutesToTime(newStartMin),
+    this.minutesToTime(newEndMin),
+    availability.slotDuration,
+    availability.capacity,
+  );
+
+  for (const slot of remainingSlots) {
+    const slotStartMin = this.timeToMinutes(slot.startTime);
+
+    const bookedCount = appointments.filter(
+      (appt) =>
+        this.timeToMinutes(appt.startTime) === slotStartMin &&
+        !affectedAppointments.includes(appt),
+    ).length;
+
+    slot.availableCapacity = slot.capacity - bookedCount;
+  }
+
+  for (const appt of affectedAppointments) {
+    const freeSlot = remainingSlots.find(
+      (slot) => slot.availableCapacity > 0,
+    );
+
+    if (!freeSlot) {
+      throw new BadRequestException(
+        'Unable to shrink session without affecting patients',
+      );
+    }
+
+    appt.startTime = freeSlot.startTime;
+    appt.endTime = freeSlot.endTime;
+    appt.reportingTime = freeSlot.startTime;
+
+    await this.appointmentRepo.save(appt);
+
+    freeSlot.availableCapacity--;
+  }
+
+  if (activeElastic) {
+    activeElastic.status = ElasticSlotStatus.INACTIVE;
+    await this.elasticSlotRepo.save(activeElastic);
+  }
+
+  const elasticSlot = this.elasticSlotRepo.create({
+    availability,
+    originalStartTime: availability.startTime,
+    originalEndTime: availability.endTime,
+    extendedStartTime:
+      newStartTime ?? activeElastic?.extendedStartTime ?? null,
+    extendedEndTime:
+      newEndTime ?? activeElastic?.extendedEndTime ?? null,
+    status: ElasticSlotStatus.ACTIVE,
+    reason,
+  });
+
+  await this.elasticSlotRepo.save(elasticSlot);
+
+  return {
+    message: 'Session shrunk successfully using In-Fill strategy',
+    availabilityId,
+    from: {
+      startTime: this.formatTimeHHMM(currentStart),
+      endTime: this.formatTimeHHMM(currentEnd),
+    },
+    to: {
+      startTime: this.formatTimeHHMM(
+        elasticSlot.extendedStartTime ?? currentStart,
+      ),
+      endTime: this.formatTimeHHMM(
+        elasticSlot.extendedEndTime ?? currentEnd,
+      ),
+    },
+    affectedAppointments: affectedAppointments.length,
+  };
+}
+
+private generateSlots(
+  startTime: string,
+  endTime: string,
+  slotDuration: number,
+  capacity: number,
+) {
+  const slots: {
+    startTime: string;
+    endTime: string;
+    capacity: number;
+    availableCapacity: number;
+  }[] = [];
+
+  let start = this.timeToMinutes(startTime);
+  const end = this.timeToMinutes(endTime);
+
+  while (start + slotDuration <= end) {
+    const slotStart = start;
+    const slotEnd = start + slotDuration;
+
+    slots.push({
+      startTime: this.minutesToTime(slotStart),
+      endTime: this.minutesToTime(slotEnd),
+      capacity,
+      availableCapacity: capacity,
+    });
+
+    start = slotEnd;
+  }
+
+  return slots;
+}
+
+
 }

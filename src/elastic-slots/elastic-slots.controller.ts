@@ -59,4 +59,14 @@ expand(@Req() req, @Body() body) {
   );
 }
 
+@Post('shrink')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('DOCTOR')
+shrinkSession(@Req() req, @Body() body) {
+  return this.elasticSlotsService.shrinkSessionTime(
+    req.user.userId,
+    body,
+  );
+}
+
 }
