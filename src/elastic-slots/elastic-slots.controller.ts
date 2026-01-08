@@ -69,4 +69,24 @@ shrinkSession(@Req() req, @Body() body) {
   );
 }
 
+@Post('squeeze/wave')
+@UseGuards(JwtAuthGuard)
+async squeezeWave(
+  @Req() req,
+  @Body()
+  body: {
+    availabilityId: number;
+    newStartTime: string;
+    newEndTime: string;
+  },
+) {
+  return this.elasticSlotsService.squeezeWaveSession(
+    req.user.userId,
+    body.availabilityId,
+    body.newStartTime,
+    body.newEndTime,
+  );
+}
+
+
 }

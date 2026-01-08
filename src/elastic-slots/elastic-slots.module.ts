@@ -5,13 +5,13 @@ import { ElasticSlotsController } from './elastic-slots.controller';
 import { ElasticSlotsService } from './elastic-slots.service';
 import { AvailabilityModule } from 'src/availability/availability.module';
 import { DoctorsModule } from 'src/doctors/doctors.module';
-import { App } from 'supertest/types';
 import { Doctor } from 'src/doctors/doctor.entity';
 import { Appointment } from 'src/appointments/appointment.entity';
+import { SlotAllocation } from './slot-allocation.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ElasticSlot,Appointment,Doctor]),
+    TypeOrmModule.forFeature([ElasticSlot,Appointment,Doctor,SlotAllocation]),
     AvailabilityModule,
     DoctorsModule,
 

@@ -11,7 +11,7 @@ import { ElasticSlotStatus } from './elastic-slot.entity';
 import { ScheduledType } from '../common/enums/scheduled-type.enum';
 import { AppointmentStatus } from '../appointments/appointment.entity';
 import { Appointment } from '../appointments/appointment.entity';
-
+import { SlotAllocation, AllocationType } from './slot-allocation.entity';
 @Injectable()
 export class ElasticSlotsService {
   constructor(
@@ -26,6 +26,9 @@ export class ElasticSlotsService {
 
     @InjectRepository(Appointment)
     private appointmentRepo: Repository<Appointment>,
+
+    @InjectRepository(SlotAllocation)
+    private slotAllocationRepo: Repository<SlotAllocation>,
   ) {}
 
   /*async createElasticSlot(
@@ -504,8 +507,11 @@ async shrinkSessionTime(userId: number, body: any) {
     );
 
     if (!freeSlot) {
-      throw new BadRequestException(
-        'Unable to shrink session without affecting patients',
+     return this.squeezeWaveSession(
+        userId,
+        availabilityId,
+        newStartTime ?? currentStart,
+        newEndTime ?? currentEnd,
       );
     }
 
@@ -588,6 +594,95 @@ private generateSlots(
 
   return slots;
 }
+
+async squeezeWaveSession(
+  userId: number,
+  availabilityId: number,
+  newStartTime: string,
+  newEndTime: string,
+) {
+  // 1️⃣ Fetch availability
+  const availability = await this.availabilityRepo.findOne({
+    where: { id: availabilityId, isActive: true },
+    relations: ['doctor', 'doctor.user'],
+  });
+
+  if (!availability) {
+    throw new BadRequestException('Availability not found');
+  }
+
+  if (availability.doctor.user.id !== userId) {
+    throw new BadRequestException('Unauthorized');
+  }
+
+  if (availability.scheduledType !== ScheduledType.WAVE) {
+    throw new BadRequestException('Squeeze allowed only for WAVE');
+  }
+
+  // 2️⃣ Validate new time range
+  const newStartMin = this.timeToMinutes(newStartTime);
+  const newEndMin = this.timeToMinutes(newEndTime);
+
+  if (newEndMin <= newStartMin) {
+    throw new BadRequestException('Invalid squeeze time range');
+  }
+
+  // 3️⃣ Fetch ALL slot allocations (ordered)
+  const allocations = await this.slotAllocationRepo.find({
+    where: { availability: { id: availabilityId } },
+    order: { orderIndex: 'ASC' },
+    relations: ['appointment'],
+  });
+
+  if (allocations.length === 0) {
+    throw new BadRequestException('No appointments to squeeze');
+  }
+
+  // 4️⃣ Calculate compressed interval
+  const totalAvailableMinutes = newEndMin - newStartMin;
+  const compressedInterval = Math.floor(
+    totalAvailableMinutes / allocations.length,
+  );
+
+  if (compressedInterval <= 0) {
+    throw new BadRequestException(
+      'Not enough time to squeeze all appointments',
+    );
+  }
+
+  // 5️⃣ Reassign reporting times
+  for (let i = 0; i < allocations.length; i++) {
+    const newReportingMinutes =
+      newStartMin + i * compressedInterval;
+
+    const newReportingTime =
+      this.minutesToTime(newReportingMinutes);
+
+    // Update SlotAllocation
+    allocations[i].reportingTime = newReportingTime;
+    allocations[i].allocationType = AllocationType.SQUEEZE;
+
+    // Update Appointment
+    allocations[i].appointment.reportingTime = newReportingTime;
+
+    await this.appointmentRepo.save(allocations[i].appointment);
+    await this.slotAllocationRepo.save(allocations[i]);
+  }
+
+  // 6️⃣ Update availability session timings
+  availability.startTime = newStartTime;
+  availability.endTime = newEndTime;
+
+  await this.availabilityRepo.save(availability);
+
+  return {
+    message: 'Wave session squeezed successfully',
+    availabilityId,
+    affectedAppointments: allocations.length,
+    newIntervalMinutes: compressedInterval,
+  };
+}
+
 
 
 }

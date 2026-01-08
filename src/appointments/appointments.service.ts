@@ -7,6 +7,9 @@ import { User } from '../users/user.entity';
 import { AvailabilityService } from '../availability/availability.service';
 import { MoreThanOrEqual } from 'typeorm';
 import { In } from 'typeorm';
+import { ScheduledType } from '../common/enums/scheduled-type.enum';
+import { Availability } from 'src/availability/availability.entity';
+import { SlotAllocation, AllocationType } from 'src/elastic-slots/slot-allocation.entity';
 
 @Injectable()
 export class AppointmentsService {
@@ -20,144 +23,249 @@ export class AppointmentsService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
 
+    @InjectRepository(Availability)
+    private availabilityRepo: Repository<Availability>,
     private availabilityService: AvailabilityService,
+
+    @InjectRepository(SlotAllocation)
+    private slotAllocationRepo: Repository<SlotAllocation>,
   ) {}
 
   // 1️⃣ BOOK APPOINTMENT
-  async bookAppointment(
-    patientId: number,
-    body: any,
-  ) {
-    const { doctorId, date, startTime, endTime, reason } = body;
+ async bookAppointment(patientId: number, body: any) {
+  const { doctorId, date, startTime, endTime, reason } = body;
 
-    const doctor = await this.doctorRepo.findOne({
-      where: { id: doctorId },
-      relations: ['user'],
-    });
+  const doctor = await this.doctorRepo.findOne({
+    where: { id: doctorId },
+    relations: ['user'],
+  });
 
-    if (!doctor) {
-      throw new BadRequestException('Doctor not found');
-    }
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
 
-    const patient = await this.userRepo.findOne({
-      where: { id: patientId },
-    });
+  const patient = await this.userRepo.findOne({
+    where: { id: patientId },
+  });
 
-    
-if (!patient) {
-  throw new BadRequestException('Patient not found');
+  if (!patient) {
+    throw new BadRequestException('Patient not found');
+  }
+
+  // Get availability for the date
+  const availability =
+    await this.availabilityService.getAvailabilityByDate(
+      doctorId,
+      date,
+    );
+
+  if (!availability || availability.source === 'NONE') {
+    throw new BadRequestException(
+      'No availability for the selected date',
+    );
+  }
+
+  //  Prevent duplicate booking (doctor + date)
+  const existingAppointment = await this.appointmentRepo.findOne({
+    where: {
+      patient: { id: patientId },
+      doctor: { id: doctorId },
+      date,
+      status: AppointmentStatus.BOOKED,
+    },
+  });
+
+  /*if (existingAppointment) {
+    throw new BadRequestException(
+      'You already have an appointment with this doctor on this date',
+    );
+  }*/
+
+  /* =========================================================
+     STREAM SCHEDULING
+     ========================================================= */
+  if (availability.scheduledType === ScheduledType.STREAM) {
+
+  const availabilityEntity = await this.availabilityRepo.findOne({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      isActive: true,
+      scheduledType: ScheduledType.STREAM,
+    },
+  });
+
+  if (!availabilityEntity) {
+    throw new BadRequestException(
+      'No stream availability found for this date',
+    );
+  }
+
+  const { startTime, endTime, capacity, slotDuration } =
+    availabilityEntity;
+
+  const totalBookings = await this.appointmentRepo.count({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      status: AppointmentStatus.BOOKED,
+    },
+  });
+
+  if (totalBookings >= capacity) {
+    throw new BadRequestException('Session is fully booked');
+  }
+
+  const reportingMinutes =
+    this.timeToMinutes(startTime) +
+    totalBookings * slotDuration;
+
+  const reportingTime = this.minutesToTime(reportingMinutes);
+
+  const appointment = this.appointmentRepo.create({
+    doctor,
+    patient,
+    date,
+    startTime,
+    endTime,
+    reportingTime,
+    reason,
+    status: AppointmentStatus.BOOKED,
+  });
+
+  await this.appointmentRepo.save(appointment);
+
+  return {
+    message: 'Appointment booked successfully',
+    appointment: {
+      id: appointment.id,
+      doctorName: doctor.user.name,
+      date,
+      reportingTime,
+    },
+  };
 }
 
-    // 🔍 Get availability for the date
-    const availability =
-      await this.availabilityService.getAvailabilityByDate(
-        doctorId,
-        date,
-      );
 
-    if (!availability) {
-      throw new BadRequestException(
-        'No availability for the selected date',
-      );
+  /* =========================================================
+   WAVE / SLOT SCHEDULING
+   ========================================================= */
+
+if (!startTime || !endTime) {
+  throw new BadRequestException(
+    'startTime and endTime are required for slot or wave booking',
+  );
+}
+
+let slot: any = undefined;
+let matchedSession: any = undefined;
+
+if (Array.isArray(availability.sessions)) {
+  for (const session of availability.sessions) {
+    if (Array.isArray(session.slots)) {
+      const found = session.slots.find((s) => {
+        return (
+          this.timeToMinutes(s.startTime) ===
+            this.timeToMinutes(startTime) &&
+          this.timeToMinutes(s.endTime) ===
+            this.timeToMinutes(endTime)
+        );
+      });
+
+      if (found) {
+        slot = found;
+        matchedSession = session; // 👈 capture session
+        break;
+      }
     }
+  }
+}
 
-    // Prevent duplicate booking for same doctor on same day
-  const existingAppointment = await this.appointmentRepo.findOne({
+if (!slot || !matchedSession) {
+  throw new BadRequestException('Slot not available');
+}
+
+const bookedCount = await this.appointmentRepo.count({
   where: {
-    patient: { id: patientId },
     doctor: { id: doctorId },
     date,
+    startTime,
+    endTime,
     status: AppointmentStatus.BOOKED,
   },
 });
 
-    if (existingAppointment) {
-      throw new BadRequestException(
-        'You already have an appointment with this doctor on this date',
-      );
-    }
+if (bookedCount >= slot.capacity) {
+  throw new BadRequestException('Slot is fully booked');
+}
 
-
-    let slot: any = undefined;
-    if (Array.isArray(availability.sessions)) {
-      for (const session of availability.sessions) {
-        if (Array.isArray(session.slots)) {
-          const found = session.slots.find((s) => {
-            try {
-              return (
-                this.timeToMinutes(s.startTime) ===
-                  this.timeToMinutes(startTime) &&
-                this.timeToMinutes(s.endTime) ===
-                  this.timeToMinutes(endTime)
-              );
-            } catch (e) {
-              return false;
-            }
-          });
-          if (found) {
-            slot = found;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!slot) {
-      throw new BadRequestException('Slot not available');
-    }
-
-    // 🔢 Count existing appointments
-    const bookedCount = await this.appointmentRepo.count({
-      where: {
-        doctor: { id: doctorId },
-        date,
-        startTime,
-        endTime,
-        status: AppointmentStatus.BOOKED,
-      },
-    });
-
-    if (bookedCount >= slot.capacity) {
-      throw new BadRequestException(
-        'Slot is fully booked',
-      );
-    }
-
-    const slotDurationMinutes =
-  this.timeToMinutes(endTime) - this.timeToMinutes(startTime);
+const slotDurationMinutes =
+  this.timeToMinutes(endTime) -
+  this.timeToMinutes(startTime);
 
 const consultationInterval =
   Math.floor(slotDurationMinutes / slot.capacity);
 
-  const reportingMinutes =
+const reportingMinutes =
   this.timeToMinutes(startTime) +
   bookedCount * consultationInterval;
 
 const reportingTime = this.minutesToTime(reportingMinutes);
 
-    // ✅ Create appointment
-    const appointment = this.appointmentRepo.create({
-      doctor,
-      patient,
-      date,
-      startTime,
-      endTime,
-      reportingTime,
-      reason,
-    });
+const appointment = this.appointmentRepo.create({
+  doctor,
+  patient,
+  date,
+  startTime,
+  endTime,
+  reportingTime,
+  reason,
+  status: AppointmentStatus.BOOKED,
+});
 
-    await this.appointmentRepo.save(appointment);
+await this.appointmentRepo.save(appointment);
 
-    return {
-       message: 'Appointment booked successfully',
+/* =========================================================
+   CREATE SlotAllocation → ONLY FOR WAVE
+   ========================================================= */
+
+if (matchedSession.scheduledType === ScheduledType.WAVE) {
+
+  const availabilityEntity = await this.availabilityRepo.findOne({
+    where: {
+      id: matchedSession.availabilityId, // 👈 safest anchor
+      isActive: true,
+    },
+  });
+
+  if (!availabilityEntity) {
+    throw new BadRequestException('Availability session not found');
+  }
+
+  const allocation = this.slotAllocationRepo.create({
+    appointment,
+    availability: availabilityEntity,
+    slotStartTime: startTime,
+    slotEndTime: endTime,
+    orderIndex: bookedCount,
+    reportingTime,
+    allocationType: AllocationType.NORMAL,
+  });
+
+  await this.slotAllocationRepo.save(allocation);
+}
+
+return {
+  message: 'Appointment booked successfully',
   appointment: {
     id: appointment.id,
     doctorName: doctor.user.name,
     date: appointment.date,
     reportingTime: appointment.reportingTime,
   },
-    };
-  }
+};
+
+}
 
   private timeToMinutes(time: string): number {
     const [h, m] = time.split(':').map(Number);

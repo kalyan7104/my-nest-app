@@ -1,16 +1,21 @@
-/*import {
+import {
   Entity,
   PrimaryGeneratedColumn,
-  ManyToOne,
   Column,
+  ManyToOne,
   CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
-import { ElasticSlot } from './elastic-slot.entity';
 import { Appointment } from '../appointments/appointment.entity';
+import { Availability } from '../availability/availability.entity';
 
-export enum SlotAllocationStatus {
-  ACTIVE = 'ACTIVE',
-  RELEASED = 'RELEASED',
+/**
+ * How this allocation was created
+ */
+export enum AllocationType {
+  NORMAL = 'NORMAL',   // normal booking
+  INFILL = 'INFILL',   // moved during infill
+  SQUEEZE = 'SQUEEZE', // moved during squeeze
 }
 
 @Entity('slot_allocations')
@@ -18,30 +23,56 @@ export class SlotAllocation {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // 🔗 Elastic slot being consumed
-  @ManyToOne(
-    () => ElasticSlot,
-    (elasticSlot) => elasticSlot.allocations,
-    { onDelete: 'CASCADE' },
-  )
-  elasticSlot: ElasticSlot;
-
-  // 🔗 Appointment consuming capacity
+  /**
+   * Appointment being allocated
+   * One appointment → one allocation
+   */
   @ManyToOne(() => Appointment, { onDelete: 'CASCADE' })
   appointment: Appointment;
 
-  // ⏱ Final reporting time given to patient
-  @Column({ type: 'time' })
-  reportingTime: string;
+  /**
+   * Parent availability session
+   * Needed for elastic expand/shrink
+   */
+  @ManyToOne(() => Availability, { onDelete: 'CASCADE' })
+  availability: Availability;
 
-  // 📌 Allocation state
+  /**
+   * Slot window this appointment belongs to
+   * (used mainly for WAVE)
+   */
+  @Column({nullable: true})
+  slotStartTime: string; // "10:00"
+
+  @Column({nullable: true})
+  slotEndTime: string; // "10:30"
+
+  /**
+   * Position inside the slot
+   * 0, 1, 2, ...
+   */
+  @Column({ type: 'int' ,nullable: true})
+  orderIndex: number;
+
+  /**
+   * Final reporting time calculated for the patient
+   */
+  @Column()
+  reportingTime: string; // "10:15"
+
+  /**
+   * Why this allocation exists / was updated
+   */
   @Column({
     type: 'enum',
-    enum: SlotAllocationStatus,
-    default: SlotAllocationStatus.ACTIVE,
+    enum: AllocationType,
+    default: AllocationType.NORMAL,
   })
-  status: SlotAllocationStatus;
+  allocationType: AllocationType;
 
   @CreateDateColumn()
-  allocatedAt: Date;
-}*/
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}

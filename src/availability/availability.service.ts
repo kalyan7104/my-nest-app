@@ -32,107 +32,122 @@ private recurringRepo: Repository<RecurringAvailability>,
 
   // 1️⃣ Create availability (date)
   async createAvailability(userId: number, body: any) {
-    const {
-      date,
-      startTime,
-      endTime,
-      scheduledType = ScheduledType.SLOT,
-      slotDuration,
-      capacity,
-    } = body;
-
-    const doctor = await this.doctorRepo.findOne({
-      where: { user: { id: userId } },
-      relations: ['user'],
-    });
-
-    if (!doctor) {
-      throw new BadRequestException('Doctor not found');
-    }
-
-    if (doctor.verificationStatus !== VerificationStatus.APPROVED) {
-      throw new BadRequestException('Doctor not approved');
-    }
-
-    // ⏱️ Time validation
-    const start = this.timeToMinutes(startTime);
-    const end = this.timeToMinutes(endTime);
-
-    if (end <= start) {
-      throw new BadRequestException(
-        'End time must be greater than start time',
-      );
-    }
-
-    if (!slotDuration || slotDuration <= 0) {
-  throw new BadRequestException('Invalid slot duration');
-}
-
-const totalMinutes = end - start;
-
-if (totalMinutes % slotDuration !== 0) {
-  throw new BadRequestException(
-    'Time range must be divisible by slot duration',
-  );
-}
-
-    // 👥 Capacity validation
-    if (scheduledType === ScheduledType.SLOT && capacity !== 1) {
-      throw new BadRequestException(
-        'Slot scheduling must have capacity 1',
-      );
-    }
-
-    if (
-      scheduledType === ScheduledType.WAVE &&
-      (!capacity || capacity < 1)
-    ) {
-      throw new BadRequestException(
-        'Wave scheduling requires capacity > 0',
-      );
-    }
-
-    // ✅ Allow multiple sessions but prevent overlap
-const existingSessions = await this.availabilityRepo.find({
-  where: {
-    doctor: { id: doctor.id },
+  const {
     date,
-    isActive: true,
-  },
-});
+    startTime,
+    endTime,
+    scheduledType = ScheduledType.SLOT,
+    slotDuration,
+    capacity,
+  } = body;
 
-for (const session of existingSessions) {
-  const existingStart = this.timeToMinutes(session.startTime);
-  const existingEnd = this.timeToMinutes(session.endTime);
+  const doctor = await this.doctorRepo.findOne({
+    where: { user: { id: userId } },
+    relations: ['user'],
+  });
 
-  const overlaps =
-    !(end <= existingStart || start >= existingEnd);
+  if (!doctor) {
+    throw new BadRequestException('Doctor not found');
+  }
 
-  if (overlaps) {
+  if (doctor.verificationStatus !== VerificationStatus.APPROVED) {
+    throw new BadRequestException('Doctor not approved');
+  }
+
+  // ⏱️ Time validation
+  const start = this.timeToMinutes(startTime);
+  const end = this.timeToMinutes(endTime);
+
+  if (end <= start) {
     throw new BadRequestException(
-      `Session overlaps with existing session (${session.startTime} - ${session.endTime})`,
+      'End time must be greater than start time',
     );
   }
+
+  // Slot duration validation (required for all)
+  if (!slotDuration || slotDuration <= 0) {
+    throw new BadRequestException('Invalid slot duration');
+  }
+
+  const totalMinutes = end - start;
+
+  // 🔹 Divisibility only for SLOT & WAVE
+  if (
+    (scheduledType === ScheduledType.SLOT ||
+      scheduledType === ScheduledType.WAVE) &&
+    totalMinutes % slotDuration !== 0
+  ) {
+    throw new BadRequestException(
+      'Time range must be divisible by slot duration',
+    );
+  }
+
+  // 👥 Capacity validation
+  if (scheduledType === ScheduledType.SLOT && capacity !== 1) {
+    throw new BadRequestException(
+      'Slot scheduling must have capacity 1',
+    );
+  }
+
+  if (
+    scheduledType === ScheduledType.WAVE &&
+    (!capacity || capacity < 1)
+  ) {
+    throw new BadRequestException(
+      'Wave scheduling requires capacity > 0',
+    );
+  }
+
+  if (
+    scheduledType === ScheduledType.STREAM &&
+    (!capacity || capacity < 1)
+  ) {
+    throw new BadRequestException(
+      'Stream scheduling requires capacity > 0',
+    );
+  }
+
+  // ✅ Allow multiple sessions per day but prevent overlap
+  const existingSessions = await this.availabilityRepo.find({
+    where: {
+      doctor: { id: doctor.id },
+      date,
+      isActive: true,
+    },
+  });
+
+  for (const session of existingSessions) {
+    const existingStart = this.timeToMinutes(session.startTime);
+    const existingEnd = this.timeToMinutes(session.endTime);
+
+    const overlaps =
+      !(end <= existingStart || start >= existingEnd);
+
+    if (overlaps) {
+      throw new BadRequestException(
+        `Session overlaps with existing session (${session.startTime} - ${session.endTime})`,
+      );
+    }
+  }
+
+  const availability = this.availabilityRepo.create({
+    doctor,
+    date,
+    startTime,
+    endTime,
+    scheduledType,
+    slotDuration,
+    capacity: scheduledType === ScheduledType.SLOT ? 1 : capacity,
+  });
+
+  await this.availabilityRepo.save(availability);
+
+  return {
+    message: 'Availability added successfully',
+    availabilityId: availability.id,
+  };
 }
 
-
-    const availability = this.availabilityRepo.create({
-      doctor,
-      date,
-      startTime,
-      endTime,
-      scheduledType,
-      slotDuration,
-      capacity: scheduledType === ScheduledType.SLOT ? 1 : capacity,
-    });
-
-    await this.availabilityRepo.save(availability);
-
-    return {
-      message: 'Availability added successfully',
-      availabilityId: availability.id,
-    };
-  }
 
   
 
@@ -324,45 +339,60 @@ async getAvailabilityByDate(
   });
 
   const elasticSlots = await this.elasticSlotRepo.find({
-  where: {
-    availability: { id: In(sessions.map((s) => s.id)) },
-    status: ElasticSlotStatus.ACTIVE,
-  },
-  relations: ['availability'],
-});
+    where: {
+      availability: { id: In(sessions.map((s) => s.id)) },
+      status: ElasticSlotStatus.ACTIVE,
+    },
+    relations: ['availability'],
+  });
 
   if (sessions.length > 0) {
-  return {
-    source: 'CUSTOM',
-    date,
-    sessions: sessions.map((session) => {
-      const elastic = elasticSlots.find(
-        (e) => e.availability.id === session.id,
-      );
+    return {
+      source: 'CUSTOM',
+      date,
+      sessions: sessions.map((session) => {
+        const elastic = elasticSlots.find(
+          (e) => e.availability.id === session.id,
+        );
 
-      const effectiveStartTime = this.formatTime(
-  elastic?.extendedStartTime ?? session.startTime,
-);
+        const effectiveStartTime = this.formatTime(
+          elastic?.extendedStartTime ?? session.startTime,
+        );
 
-const effectiveEndTime = this.formatTime(
-  elastic?.extendedEndTime ?? session.endTime,
-);
+        const effectiveEndTime = this.formatTime(
+          elastic?.extendedEndTime ?? session.endTime,
+        );
 
-return {
-  availabilityId: session.id,
-  scheduledType: session.scheduledType,
-  startTime: effectiveStartTime,
-  endTime: effectiveEndTime,
-  slots: this.generateSlots(
-    effectiveStartTime,
-    effectiveEndTime,
-    session.slotDuration,
-    session.capacity,
-  ),
-};
-    }),
-  };
-}
+        // 🔴 STREAM → NO SLOT GENERATION
+        if (session.scheduledType === ScheduledType.STREAM) {
+          return {
+            availabilityId: session.id,
+            scheduledType: ScheduledType.STREAM,
+            startTime: effectiveStartTime,
+            endTime: effectiveEndTime,
+            capacity: session.capacity,
+            slotDuration: session.slotDuration,
+            slots: [], // explicitly empty
+          };
+        }
+
+        // 🟢 SLOT / WAVE → generate slots
+        return {
+          availabilityId: session.id,
+          scheduledType: session.scheduledType,
+          startTime: effectiveStartTime,
+          endTime: effectiveEndTime,
+          slots: this.generateSlots(
+            effectiveStartTime,
+            effectiveEndTime,
+            session.slotDuration,
+            session.capacity,
+          ),
+        };
+      }),
+    };
+  }
+
   // 2️⃣ No custom sessions → fallback to recurring
   const dayOfWeek = new Date(date)
     .toLocaleDateString('en-US', { weekday: 'long' })
@@ -388,17 +418,32 @@ return {
   return {
     source: 'RECURRING',
     date,
-    sessions: recurringRules.map((rule) => ({
-      scheduledType: rule.scheduledType,
-      startTime: rule.startTime,
-      endTime: rule.endTime,
-      slots: this.generateSlots(
-        rule.startTime,
-        rule.endTime,
-        rule.slotDuration,
-        rule.capacity,
-      ),
-    })),
+    sessions: recurringRules.map((rule) => {
+      // 🔴 STREAM (RECURRING) → NO SLOT GENERATION
+      if (rule.scheduledType === ScheduledType.STREAM) {
+        return {
+          scheduledType: ScheduledType.STREAM,
+          startTime: rule.startTime,
+          endTime: rule.endTime,
+          capacity: rule.capacity,
+          slotDuration: rule.slotDuration,
+          slots: [],
+        };
+      }
+
+      // 🟢 SLOT / WAVE
+      return {
+        scheduledType: rule.scheduledType,
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+        slots: this.generateSlots(
+          rule.startTime,
+          rule.endTime,
+          rule.slotDuration,
+          rule.capacity,
+        ),
+      };
+    }),
   };
 }
 
